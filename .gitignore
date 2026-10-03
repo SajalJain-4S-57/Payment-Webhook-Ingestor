@@ -1,20 +1,23 @@
 # Environment
 .env
+.env.local
 .venv/
 env/
 venv/
 ENV/
 
-# Python
+# Python & Caches
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
 
-# Database & IDE
+# Database & Postman
 *.db
 *.sqlite3
 .vscode/
 .idea/
 .pytest_cache/
+.postman/
+postman/
