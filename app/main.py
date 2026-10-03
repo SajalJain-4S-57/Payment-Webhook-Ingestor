@@ -1,25 +1,59 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Header, HTTPException, Depends, status
+from fastapi import FastAPI, Header, HTTPException, Depends, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import SQLAlchemyError
 from app.config import settings
 from app.schemas import WebhookPayload
 from app.database import engine, Base, get_db
 from app.models import WebhookEvent
 from app.logging_config import logger
 
+MAX_BODY_SIZE = 1 * 1024 * 1024  # 1 MB Limit
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Initializing database tables...")
-    Base.metadata.create_all(bind=engine)
-    logger.info("Application startup complete.")
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info("Application startup complete.")
+    except Exception as e:
+        logger.error(f"Failed to initialize database tables on startup: {str(e)}")
     yield
     logger.info("Application shutdown.")
 
 
 app = FastAPI(title="Payment Webhook Ingestor", lifespan=lifespan)
+
+
+# 1. Middleware: Payload Size Limit (413 Payload Too Large)
+@app.middleware("http")
+async def limit_payload_size(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_BODY_SIZE:
+                logger.warning("Request rejected: Payload exceeds 1MB limit.")
+                return JSONResponse(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    content={"detail": "Payload too large. Maximum size allowed is 1MB."},
+                )
+        except ValueError:
+            pass
+    return await call_next(request)
+
+
+# 2. Global Unhandled Exception Handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.critical(f"Unhandled server exception: {str(exc)}", exc_info=True)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "detail": "An unexpected internal server error occurred.",
+            "error_code": "INTERNAL_SERVER_ERROR",
+        },
+    )
 
 
 @app.get("/health")
@@ -83,7 +117,7 @@ def receive_webhook(
         db_event = WebhookEvent(
             event_id=payload.event_id,
             event_type=payload.event_type,
-            payload=payload.model_dump(),
+            payload=payload.model_dump(mode="json"),
             status="PROCESSED",
         )
         db.add(db_event)

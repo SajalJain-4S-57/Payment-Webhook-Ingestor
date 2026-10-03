@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock
 from app.main import app
@@ -53,8 +54,35 @@ def test_webhook_invalid_payload():
     assert response.status_code == 422
 
 
+def test_webhook_stale_timestamp():
+    old_time = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    payload = {
+        "event_id": f"evt_stale_{uuid.uuid4().hex[:8]}",
+        "event_type": "payment_success",
+        "amount": 50.0,
+        "timestamp": old_time,
+    }
+    headers = {"X-Webhook-Secret": settings.WEBHOOK_SECRET}
+    response = client.post("/webhook", json=payload, headers=headers)
+    assert response.status_code == 422  # Validation Error for timestamp age > 24h
+
+
+def test_webhook_payload_too_large():
+    # Send custom Content-Length header to simulate large payload
+    headers = {
+        "X-Webhook-Secret": settings.WEBHOOK_SECRET,
+        "Content-Length": str(2 * 1024 * 1024),  # 2MB
+    }
+    payload = {
+        "event_id": "evt_large",
+        "event_type": "payment_success",
+        "amount": 10.0,
+    }
+    response = client.post("/webhook", json=payload, headers=headers)
+    assert response.status_code == 413
+
+
 def test_database_failure_handling():
-    # Mock DB session that raises an error on query
     mock_db = MagicMock()
     mock_db.query.side_effect = Exception("DB Connection Lost")
 
@@ -71,5 +99,4 @@ def test_database_failure_handling():
     assert response.status_code == 500
     assert response.json()["detail"] == "Database operational failure"
 
-    # Clean up override
     app.dependency_overrides.clear()
