@@ -1,0 +1,22 @@
+# Environment
+.env
+.venv/
+env/
+venv/
+ENV/
+
+# Python & Caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Database & Postman
+*.db
+*.sqlite3
+.vscode/
+.idea/
+.pytest_cache/
+.postman/
+postman/
